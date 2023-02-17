@@ -262,6 +262,8 @@ class DDPG(OffPolicyActorCritic):
 
     with torch.no_grad():
       q_next = self.critic_target(next_states, self.actor_target(next_states))
+      # NOTE option 1 calculate the target during sampling
+      # NOTE option 2 calculate the target here.
       target = (rewards + gammas * q_next)
       target = torch.clamp(target, *self.config.clip_target_range)
 

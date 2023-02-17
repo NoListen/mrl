@@ -216,6 +216,16 @@ class SharedMemoryTrajectoryBuffer():
     if n_cpu > 1:
       self.pool = mp.Pool(n_cpu, initializer=worker_init, initargs=(BUFF,))
 
+  # Maybe this function should be moved a higher level.
+  def accum_indices(self, idxs, steps):
+    idxs_list = [idxs]
+    if steps > 1:
+      tleft = self.BUFF.buffer_tleft.get_batch(idxs)
+      for i in range(1, steps):
+        idxs_list.append(idxs + np.minimum(i, tleft))
+        # reset the indices beyond each episode to be the last ones.
+    return np.stack(idxs_list, axis=1).reshape(-1)
+
   def add_trajectory(self, *items):
     """
     Append a trajectory of transitions to the buffer.
@@ -272,8 +282,16 @@ class SharedMemoryTrajectoryBuffer():
       return transition
 
     return list(zip(*transition))
+  
+  def process_idxs(self, batch_idxs, steps):
+    if steps > 1:
+      return self.accum_indices(batch_idxs, steps)
+    return batch_idxs
 
-  def sample(self, batch_size, batch_idxs=None):
+  # NOTE(lisheng) Maybe it's better to postprocess the results when we calculate the rewards.
+  
+
+  def sample(self, batch_size, batch_idxs=None, steps=1):
     """
     sample a random batch from the buffer
 
@@ -285,11 +303,15 @@ class SharedMemoryTrajectoryBuffer():
 
     if batch_idxs is None:
       batch_idxs = np.random.randint(self.size, size=batch_size)
+    
+    batch_idxs = self.process_idxs(batch_idxs, steps)
 
     transition = []
     for buf in BUFF.items:
       item = BUFF[buf].get_batch(batch_idxs)
       transition.append(item)
+    
+
 
     return transition
 
@@ -327,9 +349,11 @@ class SharedMemoryTrajectoryBuffer():
 
     return n_step_samples((batch_idxs, n_steps, gamma))
 
-  def sample_future(self, batch_size, batch_idxs=None):
+  def sample_future(self, batch_size, batch_idxs=None, steps=1):
     if batch_idxs is None:
       batch_idxs = np.random.randint(self.size, size=batch_size)
+    
+    batch_idxs = self.process_idxs(batch_idxs, steps)
 
     if self.pool is not None:
       res = self.pool.map(future_samples, np.array_split(batch_idxs, self.n_cpu))
@@ -338,7 +362,7 @@ class SharedMemoryTrajectoryBuffer():
 
     return future_samples(batch_idxs)
 
-  def sample_from_goal_buffer(self, buffer, batch_size, batch_idxs=None):
+  def sample_from_goal_buffer(self, buffer, batch_size, batch_idxs=None, steps=1):
     """buffer is one of 'ag', 'dg', 'bg'"""
     if buffer == 'ag':
       sample_fn = achieved_samples
@@ -351,6 +375,8 @@ class SharedMemoryTrajectoryBuffer():
 
     if batch_idxs is None:
       batch_idxs = np.random.randint(self.size, size=batch_size)
+    
+    batch_idxs = self.process_idxs(batch_idxs, steps)
 
     if self.pool is not None:
       res = self.pool.map(sample_fn, np.array_split(batch_idxs, self.n_cpu))
