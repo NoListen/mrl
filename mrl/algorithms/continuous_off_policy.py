@@ -271,13 +271,13 @@ class DDPG(OffPolicyActorCritic):
       # q_next = self.critic_target(next_states[-1], self.actor_target(next_states[-1]))
       # target = (rewards[0] +  np.sum(gammas[:-1] * rewards[1:], axis=0) + gammas[-1] * q_next)
       target = self.get_nstep_targets(rewards, next_states, gammas, step=self.target_steps)
-    elif self.target_mode == "lamda":
+    elif self.target_mode == "lambda":
       lambda_value = 0.7
       total_weight = (1-lambda_value**self.target_steps)/(1-lambda_value)
       w = 1./total_weight
       target = 0
       for i in range(1, self.target_steps+1):
-        target = w * self.get_nstep_targets(rewards, next_states, gammas, step=i)
+        target += w * self.get_nstep_targets(rewards, next_states, gammas, step=i)
         w = w * lambda_value
     return target
   
