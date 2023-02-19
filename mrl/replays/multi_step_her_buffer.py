@@ -42,7 +42,7 @@ class OnlineMultiStepHERBuffer(mrl.Module):
 
   def __init__(
       self,
-      module_name='multi_step_replay_buffer'
+      module_name='replay_buffer'
     ):
     """
     Buffer that does online hindsight relabeling.
@@ -183,7 +183,7 @@ class OnlineMultiStepHERBuffer(mrl.Module):
         reward_scale = np.concatenate([reward_scale, reward_scale_fut, reward_scale_act, reward_scale_ach, reward_scale_beh])
         goals = np.concatenate([goals, goals_fut, goals_act, goals_ach, goals_beh], 0)
         # duplicate the goals.
-        goals = process_goals(goals)
+        goals = process_goals(goals, steps)
         next_states = np.concatenate([next_states, next_states_fut, next_states_act, next_states_ach, next_states_beh], 0)
 
         # Recompute reward online
@@ -238,9 +238,9 @@ class OnlineMultiStepHERBuffer(mrl.Module):
       next_states = self.state_normalizer(
           next_states, update=False).astype(np.float32)
 
-    gamma = gamma * reward_scale
-    states, actions, rewards, next_states, gammas = postprocess_data(states, actions, rewards, next_states, gammas)
-    
+    gammas = gammas * reward_scale
+
+    states, actions, rewards, next_states, gammas = postprocess_data(states, actions, rewards, next_states, gammas, steps)
     if to_torch:
       return (self.torch(states), self.torch(actions),
             self.torch(rewards), self.torch(next_states),

@@ -224,9 +224,9 @@ class SharedMemoryTrajectoryBuffer():
       tleft = self.BUFF.buffer_tleft.get_batch(idxs)
       for i in range(1, steps):
         idxs_list.append(idxs + np.minimum(i, tleft))
-        reward_scale.append((idxs_list[i] == idxs_list[i-1]).astype(np.float32))
+        reward_scale.append((idxs_list[i] != idxs_list[i-1]).astype(np.float32))
         # reset the indices beyond each episode to be the last ones.
-    return np.stack(idxs_list, axis=1).reshape(-1), np.stack(reward_scale, axis=1).reshape(-1)
+    return np.stack(idxs_list, axis=1).reshape(-1), np.stack(reward_scale, axis=1).reshape(-1, 1)
 
   def add_trajectory(self, *items):
     """
