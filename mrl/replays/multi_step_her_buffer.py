@@ -6,6 +6,38 @@ import pickle
 import os
 from mrl.utils.misc import flatten_state
 
+
+def reshape_with_steps(data, steps):
+  shape = data.shape
+  reshaped_data = data.reshape(shape[0]//steps, steps, *shape[1:])
+  return reshaped_data
+
+def separate_data_by_steps(data, steps):
+  reshaped_data = reshape_with_steps(data, steps)
+  # swap the batch dim and the step dim
+  steps_first_data = np.swapaxes(reshaped_data, 0, 1)
+  return steps_first_data
+
+# Duplicate the first goals.
+def process_goals(goals, steps):
+  shape = goals.shape
+  reshaped_goals = reshape_with_steps(goals, steps)
+  # Take only the first one.
+  reshaped_goals[:, 1:] = reshaped_goals[:, 0:1]
+  return reshaped_goals.reshape(shape)
+
+
+def postprocess_data(states, actions, rewards, next_states, gammas, steps):
+  states = separate_data_by_steps(states, steps)
+  actions = separate_data_by_steps(actions, steps)
+  rewards = separate_data_by_steps(rewards, steps)
+  next_states = separate_data_by_steps(next_states, steps)
+  gammas = separate_data_by_steps(gammas, steps)
+  # Add a accumulation of the gammas.
+  gammas = np.cumprod(gammas, axis=0)
+  return states, actions, rewards, next_states, gammas
+
+
 class OnlineMultiStepHERBuffer(mrl.Module):
 
   def __init__(
@@ -125,30 +157,33 @@ class OnlineMultiStepHERBuffer(mrl.Module):
           np.cumsum([fut_batch_size, act_batch_size, ach_batch_size, beh_batch_size]))
 
         # Sample the real batch (i.e., goals = behavioral goals)
-        states, actions, rewards, next_states, dones, previous_ags, ags, goals, _ =\
+        states, actions, rewards, next_states, dones, previous_ags, ags, goals, _, reward_scale =\
             self.buffer.sample(real_batch_size, batch_idxs=real_idxs, steps=steps)
 
         # Sample the future batch
-        states_fut, actions_fut, _, next_states_fut, dones_fut, previous_ags_fut, ags_fut, _, _, goals_fut =\
+        states_fut, actions_fut, _, next_states_fut, dones_fut, previous_ags_fut, ags_fut, _, _, goals_fut, reward_scale_fut =\
           self.buffer.sample_future(fut_batch_size, batch_idxs=fut_idxs, steps=steps)
 
         # Sample the actual batch
-        states_act, actions_act, _, next_states_act, dones_act, previous_ags_act, ags_act, _, _, goals_act =\
+        states_act, actions_act, _, next_states_act, dones_act, previous_ags_act, ags_act, _, _, goals_act, reward_scale_act =\
           self.buffer.sample_from_goal_buffer('dg', act_batch_size, batch_idxs=act_idxs, steps=steps)
 
         # Sample the achieved batch
-        states_ach, actions_ach, _, next_states_ach, dones_ach, previous_ags_ach, ags_ach, _, _, goals_ach =\
+        states_ach, actions_ach, _, next_states_ach, dones_ach, previous_ags_ach, ags_ach, _, _, goals_ach, reward_scale_ach =\
           self.buffer.sample_from_goal_buffer('ag', ach_batch_size, batch_idxs=ach_idxs, steps=steps)
 
         # Sample the behavioral batch
-        states_beh, actions_beh, _, next_states_beh, dones_beh, previous_ags_beh, ags_beh, _, _, goals_beh =\
+        states_beh, actions_beh, _, next_states_beh, dones_beh, previous_ags_beh, ags_beh, _, _, goals_beh, reward_scale_beh =\
           self.buffer.sample_from_goal_buffer('bg', beh_batch_size, batch_idxs=beh_idxs, steps=steps)
 
         # Concatenate the five
         states = np.concatenate([states, states_fut, states_act, states_ach, states_beh], 0)
         actions = np.concatenate([actions, actions_fut, actions_act, actions_ach, actions_beh], 0)
         ags = np.concatenate([ags, ags_fut, ags_act, ags_ach, ags_beh], 0)
+        reward_scale = np.concatenate([reward_scale, reward_scale_fut, reward_scale_act, reward_scale_ach, reward_scale_beh])
         goals = np.concatenate([goals, goals_fut, goals_act, goals_ach, goals_beh], 0)
+        # duplicate the goals.
+        goals = process_goals(goals)
         next_states = np.concatenate([next_states, next_states_fut, next_states_act, next_states_ach, next_states_beh], 0)
 
         # Recompute reward online
@@ -175,7 +210,7 @@ class OnlineMultiStepHERBuffer(mrl.Module):
       else:
         # Uses the original desired goals
         states, actions, rewards, next_states, dones, _ , _, _, goals =\
-                                                    self.buffer.sample(batch_size, batch_idxs=batch_idxs)
+                                                    self.buffer.sample(batch_size, batch_idxs=batch_idxs, steps=steps)
 
       if self.config.slot_based_state:
         # TODO: For now, we flatten according to config.slot_state_dims
@@ -202,6 +237,9 @@ class OnlineMultiStepHERBuffer(mrl.Module):
       states = self.state_normalizer(states, update=False).astype(np.float32)
       next_states = self.state_normalizer(
           next_states, update=False).astype(np.float32)
+
+    gamma = gamma * reward_scale
+    states, actions, rewards, next_states, gammas = postprocess_data(states, actions, rewards, next_states, gammas)
     
     if to_torch:
       return (self.torch(states), self.torch(actions),
