@@ -7,6 +7,7 @@ import numpy as np
 from sklearn.neighbors import KernelDensity
 from scipy.special import entr
 from mrl.replays.online_her_buffer import OnlineHERBuffer
+from mrl.replays.multi_step_her_buffer import OnlineMultiStepHERBuffer
 from mrl.utils.networks import MLP
 import torch
 import torch.nn.functional as F
@@ -39,7 +40,7 @@ class RawKernelDensity(mrl.Module):
     self.buffer_name = buffer_name
 
   def _setup(self):
-    assert isinstance(getattr(self, self.buffer_name), OnlineHERBuffer)
+    assert isinstance(getattr(self, self.buffer_name), OnlineHERBuffer) or isinstance(getattr(self, self.buffer_name), OnlineMultiStepHERBuffer)
 
   def _optimize(self, force=False):
     buffer = getattr(self, self.buffer_name).buffer.BUFF['buffer_' + self.item]

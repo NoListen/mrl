@@ -228,6 +228,9 @@ class OffPolicyActorCritic(mrl.Module):
 
     self.action_scale = self.env.max_action
 
+    self.target_mode = self.config.target_mode
+    self.target_steps = self.config.target_steps
+
   def save(self, save_folder : str):
     path = os.path.join(save_folder, self.module_name + '.pt')
     torch.save({
@@ -244,7 +247,7 @@ class OffPolicyActorCritic(mrl.Module):
   def _optimize(self):
     if len(self.replay_buffer) > self.config.warm_up:
       states, actions, rewards, next_states, gammas = self.replay_buffer.sample(
-          self.config.batch_size)
+          self.config.batch_size, steps=self.target_steps)
 
       self.optimize_from_batch(states, actions, rewards, next_states, gammas)
       
@@ -258,19 +261,49 @@ class OffPolicyActorCritic(mrl.Module):
 
 class DDPG(OffPolicyActorCritic):
 
+  def compute_target(self, rewards, next_states, gammas):
+    # mainly two mode. one is the lambda version and another is the nstep version.
+    # if self.target_steps == 1:
+    #   # only has one
+    #   q_next = self.critic_target(next_states[0], self.actor_target(next_states[0]))
+    #   target = (rewards[0] + gammas[0] * q_next)
+    if self.target_mode == "nstep":
+      # q_next = self.critic_target(next_states[-1], self.actor_target(next_states[-1]))
+      # target = (rewards[0] +  np.sum(gammas[:-1] * rewards[1:], axis=0) + gammas[-1] * q_next)
+      target = self.get_nstep_targets(rewards, next_states, gammas, step=self.target_steps)
+    elif self.target_mode == "lamda":
+      lambda_value = 0.7
+      total_weight = (1-lambda_value**self.target_steps)/(1-lambda_value)
+      w = 1./total_weight
+      target = 0
+      for i in range(1, self.target_steps+1):
+        target = w * self.get_nstep_targets(rewards, next_states, gammas, step=i)
+        w = w * lambda_value
+    return target
+  
+
+  def get_nstep_targets(self, rewards, next_states, gammas, step):
+    q_next = self.critic_target(next_states[step-1], self.actor_target(next_states[step-1]))
+    target = rewards[0] + gammas[step-1] * q_next
+    if step > 1:
+      target += torch.sum(gammas[:step-1] * rewards[1:step], axis=0)
+    return target
+
+
   def optimize_from_batch(self, states, actions, rewards, next_states, gammas):
 
     with torch.no_grad():
-      q_next = self.critic_target(next_states, self.actor_target(next_states))
-      # NOTE option 1 calculate the target during sampling
+      # q_next = self.critic_target(next_states, self.actor_target(next_states))
       # NOTE option 2 calculate the target here.
-      target = (rewards + gammas * q_next)
+      # we need more complex target strategies here.
+      target = self.compute_target(rewards, next_states, gammas)
+      # target = (rewards + gammas * q_next)
       target = torch.clamp(target, *self.config.clip_target_range)
 
     if hasattr(self, 'logger') and self.config.opt_steps % 1000 == 0:
       self.logger.add_histogram('Optimize/Target_q', target)
     
-    q = self.critic(states, actions)
+    q = self.critic(states[0], actions[0])
     critic_loss = F.mse_loss(q, target)
 
     self.critic_opt.zero_grad()
@@ -290,12 +323,12 @@ class DDPG(OffPolicyActorCritic):
     for p in self.critic_params:
       p.requires_grad = False
 
-    a = self.actor(states)
+    a = self.actor(states[0])
     if self.config.get('policy_opt_noise'):
       noise = torch.randn_like(a) * (self.config.policy_opt_noise * self.action_scale)
       a = (a + noise).clamp(-self.action_scale, self.action_scale)
       
-    actor_loss = -self.critic(states, a)[:,-1].mean()
+    actor_loss = -self.critic(states[0], a)[:,-1].mean()
     if self.config.action_l2_regularization:
       actor_loss += self.config.action_l2_regularization * F.mse_loss(a / self.action_scale, torch.zeros_like(a))
 

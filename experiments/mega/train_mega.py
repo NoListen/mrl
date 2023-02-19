@@ -63,7 +63,7 @@ def main(args):
           policy=ActorPolicy(),
           logger=Logger(),
           state_normalizer=Normalizer(MeanStdNormalizer()),
-          replay=OnlineHERBuffer(),
+          replay=OnlineMultiStepHERBuffer(),
       ))
 
   config.prioritized_mode = args.prioritized_mode

@@ -53,7 +53,9 @@ default_ddpg_config = lambda: AnnotatedAttrDict(
     n_step_returns=(1, 'if using n-step returns, how many steps?'),
     slot_based_state=(False, 'if state is organized by slot; i.e., [batch_size, num_slots, slot_feats]'),
     modalities=(['observation'], 'keys the agent accesses in dictionary env for observations'),
-    goal_modalities=(['desired_goal'], 'keys the agent accesses in dictionary env for goals')
+    goal_modalities=(['desired_goal'], 'keys the agent accesses in dictionary env for goals'),
+    target_steps=(1, 'the number of steps used for target calculation'),
+    target_mode=('nstep', 'the mode for target computation')
 )
 
 def protoge_config():

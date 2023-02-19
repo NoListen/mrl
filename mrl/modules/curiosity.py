@@ -5,6 +5,7 @@ Curiosity modules for unsupervised exploration
 import mrl
 import numpy as np
 from mrl.replays.online_her_buffer import OnlineHERBuffer
+from mrl.replays.multi_step_her_buffer import OnlineMultiStepHERBuffer
 from mrl.utils.misc import softmax, AttrDict
 from sklearn.neighbors import KernelDensity
 from collections import deque
@@ -36,7 +37,7 @@ class AchievedGoalCuriosity(mrl.Module):
     self.use_qcutoff = use_qcutoff
 
   def _setup(self):
-    assert isinstance(self.replay_buffer, OnlineHERBuffer)
+    assert isinstance(self.replay_buffer, OnlineHERBuffer)  or isinstance(self.replay_buffer, OnlineMultiStepHERBuffer)
     assert self.env.goal_env
 
     self.n_envs = self.env.num_envs

@@ -8,6 +8,7 @@ from mrl.utils.misc import AttrDict, add_config_args, merge_args_into_config, ma
 
 # Replays
 from mrl.replays.online_her_buffer import OnlineHERBuffer
+from mrl.replays.multi_step_her_buffer import OnlineMultiStepHERBuffer
 from mrl.replays.prioritized_replay import EntropyPrioritizedOnlineHERBuffer
 from mrl.replays.old_replay_buffer import OldReplayBuffer
 
