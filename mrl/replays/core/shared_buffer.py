@@ -15,7 +15,9 @@ def worker_init(buffer : AttrDict):
 def get_anchor_info(batch_idxs, offset_limit=2):
 # def get_anchor_info(batch_idxs, offset_limit=np.inf):
   rng = default_rng()
-  anchor_idxs = batch_idxs + rng.integers(0, offset_limit + 1)
+  tlefts = BUFF.buffer_tleft.get_batch(batch_idxs)
+
+  anchor_idxs = batch_idxs + rng.integers(0, np.minimum(offset_limit, tlefts) + 1)
   anchor_obs = BUFF.buffer_state.get_batch(anchor_idxs)
   anchor_ags = BUFF.buffer_ag.get_batch(anchor_idxs)
   return [anchor_obs, anchor_ags]
@@ -40,7 +42,7 @@ def future_samples(idxs):
   ags = BUFF.buffer_ag.get_batch(idxs)
   transition.append(ags)
 
-  transition += get_anchor_info(idxs, 2)
+  transition += get_anchor_info(idxs, np.minimum(2, offsets))
   return transition
 
 
