@@ -55,7 +55,8 @@ default_ddpg_config = lambda: AnnotatedAttrDict(
     modalities=(['observation'], 'keys the agent accesses in dictionary env for observations'),
     goal_modalities=(['desired_goal'], 'keys the agent accesses in dictionary env for goals'),
     target_steps=(1, 'the number of steps used for target calculation'),
-    target_mode=('nstep', 'the mode for target computation')
+    target_mode=('nstep', 'the mode for target computation'),
+    enable_gcdp=(False, "whether apply gcdp reg loss")
 )
 
 def protoge_config():

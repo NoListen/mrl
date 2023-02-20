@@ -230,6 +230,8 @@ class OffPolicyActorCritic(mrl.Module):
 
     self.target_mode = self.config.target_mode
     self.target_steps = self.config.target_steps
+    self.enable_gcdp = self.config.enable_gcdp
+    self.gamma = self.config.gamma
 
   def save(self, save_folder : str):
     path = os.path.join(save_folder, self.module_name + '.pt')
@@ -246,21 +248,22 @@ class OffPolicyActorCritic(mrl.Module):
 
   def _optimize(self):
     if len(self.replay_buffer) > self.config.warm_up:
-      states, actions, rewards, next_states, gammas = self.replay_buffer.sample(
+      states, actions, rewards, next_states, gammas, states_to_anchor, anchor_states_to_goal = self.replay_buffer.sample(
           self.config.batch_size, steps=self.target_steps)
 
-      self.optimize_from_batch(states, actions, rewards, next_states, gammas)
+      self.optimize_from_batch(states, actions, rewards, next_states, gammas, states_to_anchor, anchor_states_to_goal)
       
       if self.config.opt_steps % self.config.target_network_update_freq == 0:
         for target_model, model in self.targets_and_models:
           soft_update(target_model, model, self.config.target_network_update_frac)
 
-  def optimize_from_batch(self, states, actions, rewards, next_states, gammas):
+  def optimize_from_batch(self, states, actions, rewards, next_states, gammas, states_to_anchor, anchor_states_to_goal):
     raise NotImplementedError('Subclass this!')
 
 
 class DDPG(OffPolicyActorCritic):
 
+  # For the anchor states, we needed pass it along with the current AC to evaluate its performance.
   def compute_target(self, rewards, next_states, gammas):
     # mainly two mode. one is the lambda version and another is the nstep version.
     # if self.target_steps == 1:
@@ -279,6 +282,7 @@ class DDPG(OffPolicyActorCritic):
       for i in range(1, self.target_steps+1):
         target += w * self.get_nstep_targets(rewards, next_states, gammas, step=i)
         w = w * lambda_value
+      raise ValueError("the mode %s is not available" % self.target_mode)
     return target
   
 
@@ -290,7 +294,7 @@ class DDPG(OffPolicyActorCritic):
     return target
 
 
-  def optimize_from_batch(self, states, actions, rewards, next_states, gammas):
+  def optimize_from_batch(self, states, actions, rewards, next_states, gammas, states_to_anchor, anchor_states_to_goal):
 
     with torch.no_grad():
       # q_next = self.critic_target(next_states, self.actor_target(next_states))
@@ -303,8 +307,23 @@ class DDPG(OffPolicyActorCritic):
     if hasattr(self, 'logger') and self.config.opt_steps % 1000 == 0:
       self.logger.add_histogram('Optimize/Target_q', target)
     
-    q = self.critic(states[0], actions[0])
-    critic_loss = F.mse_loss(q, target)
+    if self.enable_gcdp:
+      q_anchor_to_g = self.critic_target(anchor_states_to_goal, self.actor_target(anchor_states_to_goal))
+      concat_states = torch.cat([states[0], states_to_anchor], dim=0)
+      concat_actions = torch.cat([actions[0], actions[0]], dim=0)
+      concat_q = self.critic(concat_states, concat_actions)
+      q, q_to_anchor = torch.split(concat_q, concat_q.shape[0]//2, dim=0)
+      gamma_n_q_minus_one = (1 - self.gamma) * q_to_anchor + 1
+      gamma_n_q_minus_one = torch.clamp(gamma_n_q_minus_one, 0, 1)
+      # gamma_n_q_minus_one = tf.stop_gradient(tf.clip_by_value(gamma_n_q_minus_one, 0, 1) - gamma_n_q_minus_one) + gamma_n_q_minus_one
+      gamma_n = gamma_n_q_minus_one * self.gamma
+      reg_target =  - (1 - gamma_n)/(1-self.gamma) + gamma_n * q_anchor_to_g
+      reg_target = torch.clamp(reg_target, *self.config.clip_target_range)
+      reg_loss = F.mse_loss(q, reg_target)
+      critic_loss =  F.mse_loss(q, target) + 0.1 * reg_loss
+    else:
+      q = self.critic(states[0], actions[0])
+      critic_loss = F.mse_loss(q, target)
 
     self.critic_opt.zero_grad()
     critic_loss.backward()
