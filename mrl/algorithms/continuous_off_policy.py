@@ -282,6 +282,7 @@ class DDPG(OffPolicyActorCritic):
       for i in range(1, self.target_steps+1):
         target += w * self.get_nstep_targets(rewards, next_states, gammas, step=i)
         w = w * lambda_value
+    else:
       raise ValueError("the mode %s is not available" % self.target_mode)
     return target
   
