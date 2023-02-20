@@ -12,6 +12,13 @@ def worker_init(buffer : AttrDict):
   global BUFF
   BUFF = buffer
 
+def get_anchor_info(batch_idxs, offset_limit=np.inf):
+  rng = default_rng()
+  anchor_idxs = batch_idxs + rng.integers(0, offset_limit + 1)
+  anchor_obs = BUFF.buffer_state.get_batch(anchor_idxs)
+  anchor_ags = BUFF.buffer_ag.get_batch(anchor_idxs)
+  return [anchor_obs, anchor_ags]
+
 def future_samples(idxs):
   """Assumes there is an 'ag' field, and samples n transitions, pairing each with a future ag
   from its trajectory."""
@@ -26,9 +33,13 @@ def future_samples(idxs):
 
   # add random future goals
   tlefts = BUFF.buffer_tleft.get_batch(idxs)
-  idxs = idxs + (rng.uniform(size=len(idxs)) * tlefts).round().astype(np.int64)
+  # NOTE(lisheng) the offset can be zeros here.
+  offsets = (rng.uniform(size=len(idxs)) * tlefts).round().astype(np.int64)
+  idxs = idxs + offsets
   ags = BUFF.buffer_ag.get_batch(idxs)
   transition.append(ags)
+
+  transition += get_anchor_info(idxs, offsets)
   return transition
 
 
@@ -47,6 +58,7 @@ def actual_samples(idxs):
   dgs = BUFF.buffer_dg.get_batch(idxs)
   transition.append(dgs)
 
+  transition += get_anchor_info(idxs, BUFF.buffer_tleft.get_batch(idxs))
   return transition
 
 
@@ -65,6 +77,7 @@ def achieved_samples(idxs):
   ags = BUFF.buffer_ag.get_batch(idxs)
   transition.append(ags)
 
+  transition += get_anchor_info(idxs, BUFF.buffer_tleft.get_batch(idxs))
   return transition
 
 
@@ -83,6 +96,7 @@ def behavioral_samples(idxs):
   bgs = BUFF.buffer_bg.get_batch(idxs)
   transition.append(bgs)
 
+  transition += get_anchor_info(idxs, BUFF.buffer_tleft.get_batch(idxs))
   return transition
 
 
@@ -312,6 +326,7 @@ class SharedMemoryTrajectoryBuffer():
       item = BUFF[buf].get_batch(batch_idxs)
       transition.append(item)
 
+    transition += get_anchor_info(batch_idxs, self.BUFF.buffer_tleft.get_batch(batch_idxs))
     transition.append(reward_scale)
 
     return transition

@@ -27,7 +27,7 @@ def process_goals(goals, steps):
   return reshaped_goals.reshape(shape)
 
 
-def postprocess_data(states, actions, rewards, next_states, gammas, steps):
+def postprocess_data(states, actions, rewards, next_states, gammas, steps, states_to_anchor, anchor_states_to_goal):
   states = separate_data_by_steps(states, steps)
   actions = separate_data_by_steps(actions, steps)
   rewards = separate_data_by_steps(rewards, steps)
@@ -35,7 +35,9 @@ def postprocess_data(states, actions, rewards, next_states, gammas, steps):
   gammas = separate_data_by_steps(gammas, steps)
   # Add a accumulation of the gammas.
   gammas = np.cumprod(gammas, axis=0)
-  return states, actions, rewards, next_states, gammas
+  states_to_anchor = separate_data_by_steps(states_to_anchor, steps)[0]
+  anchor_states_to_goal = separate_data_by_steps(anchor_states_to_goal, steps)[0]
+  return states, actions, rewards, next_states, gammas, states_to_anchor, anchor_states_to_goal
 
 
 class OnlineMultiStepHERBuffer(mrl.Module):
@@ -144,6 +146,9 @@ class OnlineMultiStepHERBuffer(mrl.Module):
         has_config_her = self.config.get('demo_her')
       else:
         has_config_her = self.config.get('her')
+
+      
+      # TODO (lisheng) Add the anchor information.
       
       if has_config_her:
 
@@ -157,23 +162,23 @@ class OnlineMultiStepHERBuffer(mrl.Module):
           np.cumsum([fut_batch_size, act_batch_size, ach_batch_size, beh_batch_size]))
 
         # Sample the real batch (i.e., goals = behavioral goals)
-        states, actions, rewards, next_states, dones, previous_ags, ags, goals, _, reward_scale =\
+        states, actions, rewards, next_states, dones, previous_ags, ags, goals, _, anchor_states, anchor_ags, reward_scale =\
             self.buffer.sample(real_batch_size, batch_idxs=real_idxs, steps=steps)
 
         # Sample the future batch
-        states_fut, actions_fut, _, next_states_fut, dones_fut, previous_ags_fut, ags_fut, _, _, goals_fut, reward_scale_fut =\
+        states_fut, actions_fut, _, next_states_fut, dones_fut, previous_ags_fut, ags_fut, _, _, goals_fut, fut_anchor_states, fut_anchor_ags, reward_scale_fut =\
           self.buffer.sample_future(fut_batch_size, batch_idxs=fut_idxs, steps=steps)
 
         # Sample the actual batch
-        states_act, actions_act, _, next_states_act, dones_act, previous_ags_act, ags_act, _, _, goals_act, reward_scale_act =\
+        states_act, actions_act, _, next_states_act, dones_act, previous_ags_act, ags_act, _, _, goals_act, act_anchor_states, act_anchor_ags, reward_scale_act =\
           self.buffer.sample_from_goal_buffer('dg', act_batch_size, batch_idxs=act_idxs, steps=steps)
 
         # Sample the achieved batch
-        states_ach, actions_ach, _, next_states_ach, dones_ach, previous_ags_ach, ags_ach, _, _, goals_ach, reward_scale_ach =\
+        states_ach, actions_ach, _, next_states_ach, dones_ach, previous_ags_ach, ags_ach, _, _, goals_ach, ach_anchor_states, ach_anchor_ags, reward_scale_ach =\
           self.buffer.sample_from_goal_buffer('ag', ach_batch_size, batch_idxs=ach_idxs, steps=steps)
 
         # Sample the behavioral batch
-        states_beh, actions_beh, _, next_states_beh, dones_beh, previous_ags_beh, ags_beh, _, _, goals_beh, reward_scale_beh =\
+        states_beh, actions_beh, _, next_states_beh, dones_beh, previous_ags_beh, ags_beh, _, _, goals_beh, beh_anchor_states, beh_anchor_ags, reward_scale_beh =\
           self.buffer.sample_from_goal_buffer('bg', beh_batch_size, batch_idxs=beh_idxs, steps=steps)
 
         # Concatenate the five
@@ -184,6 +189,8 @@ class OnlineMultiStepHERBuffer(mrl.Module):
         goals = np.concatenate([goals, goals_fut, goals_act, goals_ach, goals_beh], 0)
         # duplicate the goals.
         goals = process_goals(goals, steps)
+        anchor_states = np.concatenate([anchor_states, fut_anchor_states, act_anchor_states, ach_anchor_states, beh_anchor_states], 0)
+        anchor_ags = np.concatenate([anchor_ags, fut_anchor_ags, act_anchor_ags, ach_anchor_ags, beh_anchor_ags], 0)
         next_states = np.concatenate([next_states, next_states_fut, next_states_act, next_states_ach, next_states_beh], 0)
 
         # Recompute reward online
@@ -215,9 +222,13 @@ class OnlineMultiStepHERBuffer(mrl.Module):
       if self.config.slot_based_state:
         # TODO: For now, we flatten according to config.slot_state_dims
         I, J = self.config.slot_state_dims
+        states_to_anchor = np.concatenate((states[:, I, J], anchor_ags), -1)
+        anchor_states_to_goal = np.concatenate((anchor_states[:, I, J], goals), -1)
         states = np.concatenate((states[:, I, J], goals), -1)
         next_states = np.concatenate((next_states[:, I, J], goals), -1)
       else:
+        states_to_anchor = np.concatenate((states, anchor_ags), -1)
+        anchor_states_to_goal = np.concatenate((anchor_states, goals), -1)
         states = np.concatenate((states, goals), -1)
         next_states = np.concatenate((next_states, goals), -1)
       gammas = self.config.gamma * (1.-dones)
@@ -227,26 +238,34 @@ class OnlineMultiStepHERBuffer(mrl.Module):
         batch_size, self.config.n_step_returns, self.config.gamma, batch_idxs=batch_idxs
       )
       gammas = self.config.gamma**self.config.n_step_returns * (1.-dones)
+      raise ValueError("not supported")
 
     else:
       states, actions, rewards, next_states, dones = self.buffer.sample(
           batch_size, batch_idxs=batch_idxs)
       gammas = self.config.gamma * (1.-dones)
+      raise ValueError("not supported")
 
+    
+    gammas = gammas * reward_scale
+
+    states, actions, rewards, next_states, gammas, states_to_anchor, anchor_states_to_goal = postprocess_data(
+      states, actions, rewards, next_states, gammas, steps, states_to_anchor, anchor_states_to_goal)
+
+    
     if hasattr(self, 'state_normalizer'):
       states = self.state_normalizer(states, update=False).astype(np.float32)
       next_states = self.state_normalizer(
           next_states, update=False).astype(np.float32)
-
-    gammas = gammas * reward_scale
-
-    states, actions, rewards, next_states, gammas = postprocess_data(states, actions, rewards, next_states, gammas, steps)
+      states_to_anchor = self.state_normalizer(states_to_anchor, update=False).astype(np.float32)
+      anchor_states_to_goal = self.state_normalizer(anchor_states_to_goal, update=False).astype(np.float32)
+    
     if to_torch:
       return (self.torch(states), self.torch(actions),
             self.torch(rewards), self.torch(next_states),
-            self.torch(gammas))
+            self.torch(gammas), self.torch(states_to_anchor), self.torch(anchor_states_to_goal))
     else:
-      return (states, actions, rewards, next_states, gammas)
+      return (states, actions, rewards, next_states, gammas, states_to_anchor, anchor_states_to_goal)
 
   def __len__(self):
     return len(self.buffer)
