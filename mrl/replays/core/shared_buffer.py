@@ -61,7 +61,8 @@ def actual_samples(idxs):
   dgs = BUFF.buffer_dg.get_batch(idxs)
   transition.append(dgs)
 
-  transition += get_anchor_info(idxs, BUFF.buffer_tleft.get_batch(idxs))
+  transition += get_anchor_info(idxs)
+  # transition += get_anchor_info(idxs, BUFF.buffer_tleft.get_batch(idxs))
   return transition
 
 
@@ -80,7 +81,7 @@ def achieved_samples(idxs):
   ags = BUFF.buffer_ag.get_batch(idxs)
   transition.append(ags)
 
-  transition += get_anchor_info(idxs, BUFF.buffer_tleft.get_batch(idxs))
+  transition += get_anchor_info(idxs)
   return transition
 
 
@@ -99,7 +100,7 @@ def behavioral_samples(idxs):
   bgs = BUFF.buffer_bg.get_batch(idxs)
   transition.append(bgs)
 
-  transition += get_anchor_info(idxs, BUFF.buffer_tleft.get_batch(idxs))
+  transition += get_anchor_info(idxs)
   return transition
 
 
