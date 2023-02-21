@@ -27,12 +27,16 @@ def process_goals(goals, steps):
   return reshaped_goals.reshape(shape)
 
 
-def postprocess_data(states, actions, rewards, next_states, gammas, steps, states_to_anchor, anchor_states_to_goal):
+def postprocess_data(states, actions, rewards, next_states, gammas, steps, reward_scale, states_to_anchor, anchor_states_to_goal):
   states = separate_data_by_steps(states, steps)
   actions = separate_data_by_steps(actions, steps)
+  rewards = rewards * reward_scale # zero out those beyond the episode.
   rewards = separate_data_by_steps(rewards, steps)
   next_states = separate_data_by_steps(next_states, steps)
   gammas = separate_data_by_steps(gammas, steps)
+  reward_scale = separate_data_by_steps(reward_scale, steps)
+  # if steps == 1, this will do nothing.
+  gammas[:steps-1][reward_scale[1:] == 0] = 1 
   # Add a accumulation of the gammas.
   gammas = np.cumprod(gammas, axis=0)
   states_to_anchor = separate_data_by_steps(states_to_anchor, steps)[0]
@@ -246,11 +250,8 @@ class OnlineMultiStepHERBuffer(mrl.Module):
       gammas = self.config.gamma * (1.-dones)
       raise ValueError("not supported")
 
-    
-    gammas = gammas * reward_scale
-
     states, actions, rewards, next_states, gammas, states_to_anchor, anchor_states_to_goal = postprocess_data(
-      states, actions, rewards, next_states, gammas, steps, states_to_anchor, anchor_states_to_goal)
+      states, actions, rewards, next_states, gammas, steps, reward_scale, states_to_anchor, anchor_states_to_goal)
 
     
     if hasattr(self, 'state_normalizer'):
