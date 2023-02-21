@@ -27,16 +27,19 @@ def process_goals(goals, steps):
   return reshaped_goals.reshape(shape)
 
 
-def postprocess_data(states, actions, rewards, next_states, gammas, steps):
+def postprocess_data(states, actions, rewards, next_states, gammas, steps, reward_scale):
   states = separate_data_by_steps(states, steps)
   actions = separate_data_by_steps(actions, steps)
+  rewards = rewards * reward_scale # zero out those beyond the episode.
   rewards = separate_data_by_steps(rewards, steps)
   next_states = separate_data_by_steps(next_states, steps)
   gammas = separate_data_by_steps(gammas, steps)
+  reward_scale = separate_data_by_steps(reward_scale, steps)
+  # if steps == 1, this will do nothing.
+  gammas[:steps-1][reward_scale[1:] == 0] = 1 
   # Add a accumulation of the gammas.
   gammas = np.cumprod(gammas, axis=0)
   return states, actions, rewards, next_states, gammas
-
 
 class OnlineMultiStepHERBuffer(mrl.Module):
 
@@ -238,9 +241,7 @@ class OnlineMultiStepHERBuffer(mrl.Module):
       next_states = self.state_normalizer(
           next_states, update=False).astype(np.float32)
 
-    gammas = gammas * reward_scale
-
-    states, actions, rewards, next_states, gammas = postprocess_data(states, actions, rewards, next_states, gammas, steps)
+    states, actions, rewards, next_states, gammas = postprocess_data(states, actions, rewards, next_states, gammas, steps, reward_scale)
     if to_torch:
       return (self.torch(states), self.torch(actions),
             self.torch(rewards), self.torch(next_states),
